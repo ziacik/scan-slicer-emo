@@ -1,0 +1,13 @@
+# Scan Slicer Emo — application code is 100% Mora.
+# Native libraries enter only through Mora FFI modules.
+include "src/geometry.mora"
+include "src/emotion.mora"
+include "src/scanner.mora"
+include "src/vision.mora"
+include "src/ui.mora"
+
+use adw
+
+state.app = adw.Application(application_id=APP_ID)
+state.app.connect("activate", build_ui)
+state.app.run([])
