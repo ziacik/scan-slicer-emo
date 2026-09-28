@@ -1,0 +1,8 @@
+[package]
+name = "scan-slicer-emo"
+version = "0.1.0"
+entry = "app.mora"
+
+[app]
+id = "com.github.ziacik.ScanSlicerEmo"
+title = "Scan Slicer Emo"
