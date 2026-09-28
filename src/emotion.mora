@@ -1,0 +1,40 @@
+# User emotion is a belief state inferred from interaction evidence.
+# It never claims to know what the user actually feels.
+
+emotion user:
+    confident = 0.45
+    uncertain = 0.20
+    frustrated = 0.05
+
+fn affect(event, amount=1.0):
+    observe user, event, amount=amount
+    update_assistance()
+
+fn update_assistance():
+    when user.frustrated >= 0.68 or user.uncertain >= 0.78:
+        state.assist = "strong"
+    otherwise when user.frustrated >= 0.38 or user.uncertain >= 0.48:
+        state.assist = "gentle"
+    otherwise:
+        state.assist = "normal"
+
+fn assist_handle_radius():
+    when state.assist == "strong":
+        return 11.0
+    otherwise when state.assist == "gentle":
+        return 8.5
+    return 7.0
+
+fn assist_snap_radius():
+    when state.assist == "strong":
+        return 24.0
+    otherwise when state.assist == "gentle":
+        return 10.0
+    return 0.0
+
+fn assist_label():
+    when state.assist == "strong":
+        return "Strong assistance"
+    otherwise when state.assist == "gentle":
+        return "Gentle assistance"
+    return "Normal assistance"
