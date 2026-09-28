@@ -1,0 +1,130 @@
+# Geometry and perspective export. Pure Mora using OpenCV + NumPy through FFI.
+use math
+use cv
+use np
+
+fn point_distance(a, b):
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+fn midpoint(a, b):
+    return [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5]
+
+fn is_valid_quad(points):
+    repeat i in range(4):
+        when point_distance(points[i], points[(i + 1) % 4]) < 20.0:
+            return false
+    let sign = 0.0
+    repeat i in range(4):
+        let a = points[i]
+        let b = points[(i + 1) % 4]
+        let c = points[(i + 2) % 4]
+        let cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+        when abs(cross) < 1.0:
+            return false
+        when sign == 0.0:
+            sign = 1.0 if cross > 0.0 else -1.0
+        otherwise when sign * cross < 0.0:
+            return false
+    return true
+
+fn clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+
+fn snap_value(v, targets, radius):
+    let best = v
+    let best_dist = radius + 1.0
+    repeat target in targets:
+        let dist = abs(v - target)
+        when dist <= radius and dist < best_dist:
+            best = target
+            best_dist = dist
+    return best
+
+fn snap_quad(points, image_w, image_h, radius):
+    let xs = [0.0, float(image_w)]
+    let ys = [0.0, float(image_h)]
+    let out = []
+    repeat p in points:
+        out.append([snap_value(p[0], xs, radius), snap_value(p[1], ys, radius)])
+    return out if is_valid_quad(out) else points
+
+fn move_quad(points, dx, dy, image_w, image_h):
+    let min_x = min([p[0] for p in points])
+    let min_y = min([p[1] for p in points])
+    let max_x = max([p[0] for p in points])
+    let max_y = max([p[1] for p in points])
+    dx = clamp(dx, -min_x, image_w - max_x)
+    dy = clamp(dy, -min_y, image_h - max_y)
+    return [[p[0] + dx, p[1] + dy] for p in points]
+
+fn move_corner(points, index, dx, dy, image_w, image_h, snap_radius=0.0):
+    let out = [[p[0], p[1]] for p in points]
+    out[index][0] = clamp(out[index][0] + dx, 0.0, float(image_w))
+    out[index][1] = clamp(out[index][1] + dy, 0.0, float(image_h))
+    when snap_radius > 0.0:
+        out = snap_quad(out, image_w, image_h, snap_radius)
+    return out if is_valid_quad(out) else points
+
+fn move_edge(points, a_index, b_index, dx, dy, image_w, image_h, snap_radius=0.0):
+    let out = [[p[0], p[1]] for p in points]
+    let a = out[a_index]
+    let b = out[b_index]
+    let ex = b[0] - a[0]
+    let ey = b[1] - a[1]
+    let length = math.hypot(ex, ey)
+    when length < 1.0:
+        return points
+    let nx = -ey / length
+    let ny = ex / length
+    let offset = dx * nx + dy * ny
+    out[a_index] = [clamp(a[0] + nx * offset, 0.0, float(image_w)), clamp(a[1] + ny * offset, 0.0, float(image_h))]
+    out[b_index] = [clamp(b[0] + nx * offset, 0.0, float(image_w)), clamp(b[1] + ny * offset, 0.0, float(image_h))]
+    when snap_radius > 0.0:
+        out = snap_quad(out, image_w, image_h, snap_radius)
+    return out if is_valid_quad(out) else points
+
+fn frame_bounds(points):
+    let xs = [p[0] for p in points]
+    let ys = [p[1] for p in points]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+fn point_in_quad(point, points):
+    let has_pos = false
+    let has_neg = false
+    repeat i in range(4):
+        let a = points[i]
+        let b = points[(i + 1) % 4]
+        let cross = (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0])
+        has_pos = has_pos or cross > 0.0
+        has_neg = has_neg or cross < 0.0
+        when has_pos and has_neg:
+            return false
+    return true
+
+fn perspective_crop(pil_image, points):
+    let width = int(max(point_distance(points[0], points[1]), point_distance(points[3], points[2])))
+    let height = int(max(point_distance(points[0], points[3]), point_distance(points[1], points[2])))
+    width = max(2, width)
+    height = max(2, height)
+    let rgba = np.array(pil_image.convert("RGBA"))
+    let src = np.array(points, dtype=np.float32)
+    let dst = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype=np.float32)
+    let matrix = cv.getPerspectiveTransform(src, dst)
+    let warped = cv.warpPerspective(rgba, matrix, (width, height), flags=cv.INTER_CUBIC, borderMode=cv.BORDER_CONSTANT)
+    return image.Image.fromarray(warped, "RGBA")
+
+fn expand_quad(points, margin, image_w, image_h):
+    when margin <= 0:
+        return points
+    let cx = sum([p[0] for p in points]) / 4.0
+    let cy = sum([p[1] for p in points]) / 4.0
+    let out = []
+    repeat p in points:
+        let vx = p[0] - cx
+        let vy = p[1] - cy
+        let length = max(1.0, math.hypot(vx, vy))
+        out.append([
+            clamp(p[0] + vx / length * margin, 0.0, float(image_w)),
+            clamp(p[1] + vy / length * margin, 0.0, float(image_h))
+        ])
+    return out if is_valid_quad(out) else points
