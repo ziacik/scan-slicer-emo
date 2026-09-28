@@ -1,0 +1,139 @@
+use http
+use json
+use base64
+use io
+use image
+
+state.openai_model = "gpt-5.6-terra"
+
+fn point_schema():
+    return {
+        "type": "object",
+        "properties": {
+            "x": {"type": "number", "minimum": 0, "maximum": 1000},
+            "y": {"type": "number", "minimum": 0, "maximum": 1000}
+        },
+        "required": ["x", "y"],
+        "additionalProperties": false
+    }
+
+fn detect_photos_openai(pil_image, api_key, margin=0):
+    let preview = pil_image.copy()
+    preview.thumbnail((1800, 1800), image.Image.Resampling.LANCZOS)
+    let buf = io.BytesIO()
+    preview.convert("RGB").save(buf, format="JPEG", quality=88)
+    let data_url = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+    let schema = {
+        "type": "object",
+        "properties": {
+            "photos": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"p1": point_schema(), "p2": point_schema(), "p3": point_schema(), "p4": point_schema()},
+                    "required": ["p1", "p2", "p3", "p4"],
+                    "additionalProperties": false
+                }
+            }
+        },
+        "required": ["photos"],
+        "additionalProperties": false
+    }
+
+    let prompt = (
+        "Detect only the separate physical photographic prints lying on the scanned surface. "
+        "Do not detect people, faces, objects, frames, buildings, trees, or other content inside a photograph. "
+        "Do not return the scanner/page boundary. Include faded, low-contrast, black-and-white, damaged, and slightly rotated prints. "
+        "For every physical print return its four outer corners. Coordinates are normalized 0..1000 relative to the exact submitted image. "
+        "Order points clockwise; p1 is visually closest to top-left. Return no object unless it is itself a physical photo print."
+    )
+
+    let body = {
+        "model": state.openai_model,
+        "store": false,
+        "max_output_tokens": 1500,
+        "input": [{"role": "user", "content": [
+            {"type": "input_text", "text": prompt},
+            {"type": "input_image", "image_url": data_url, "detail": "high"}
+        ]}],
+        "text": {"format": {"type": "json_schema", "name": "photo_print_layout", "strict": true, "schema": schema}}
+    }
+
+    let response = http.post(
+        "https://api.openai.com/v1/responses",
+        headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
+        json=body,
+        timeout=45
+    )
+    when not response.ok:
+        let message = response.text[:500]
+        try:
+            message = response.json().get("error", {}).get("message", message)
+        except Exception:
+            pass
+        raise RuntimeError("OpenAI API returned " + str(response.status_code) + ": " + message)
+
+    let payload = response.json()
+    let output_text = payload.get("output_text")
+    when output_text is none:
+        repeat item in payload.get("output", []):
+            repeat content in item.get("content", []):
+                when content.get("type") == "output_text":
+                    output_text = content.get("text")
+                    break
+    when output_text is none:
+        raise RuntimeError("OpenAI response did not contain output_text")
+
+    let layout = json.loads(output_text)
+    let width, height = pil_image.size
+    let frames = []
+    repeat photo in layout.get("photos", []):
+        let points = []
+        repeat key in ["p1", "p2", "p3", "p4"]:
+            let p = photo[key]
+            points.append([
+                max(0.0, min(1000.0, float(p["x"]))) / 1000.0 * width,
+                max(0.0, min(1000.0, float(p["y"]))) / 1000.0 * height
+            ])
+        let bounds = frame_bounds(points)
+        let bw = bounds[2] - bounds[0]
+        let bh = bounds[3] - bounds[1]
+        let area = (bw * bh) / max(1.0, float(width * height))
+        when bw < min(width, height) * 0.04 or bh < min(width, height) * 0.04 or area < 0.003 or area > 0.80:
+            continue
+        let edge = min(width, height) * 0.02
+        let touched = int(bounds[0] <= edge) + int(bounds[1] <= edge) + int(bounds[2] >= width - edge) + int(bounds[3] >= height - edge)
+        when touched >= 3:
+            continue
+        points = expand_quad(points, margin, width, height)
+        frames.append({"corners": points})
+
+    frames.sort(key=lambda frame: (frame_bounds(frame["corners"])[1] // 40, frame_bounds(frame["corners"])[0]))
+    return dedupe_frames(frames)
+
+fn overlap_smaller(a, b):
+    let ab = frame_bounds(a["corners"])
+    let bb = frame_bounds(b["corners"])
+    let left = max(ab[0], bb[0])
+    let top = max(ab[1], bb[1])
+    let right = min(ab[2], bb[2])
+    let bottom = min(ab[3], bb[3])
+    when right <= left or bottom <= top:
+        return 0.0
+    let inter = (right - left) * (bottom - top)
+    let area_a = (ab[2] - ab[0]) * (ab[3] - ab[1])
+    let area_b = (bb[2] - bb[0]) * (bb[3] - bb[1])
+    return inter / max(1.0, min(area_a, area_b))
+
+fn dedupe_frames(frames):
+    let kept = []
+    repeat frame in frames:
+        let duplicate = false
+        repeat other in kept:
+            when overlap_smaller(frame, other) > 0.85:
+                duplicate = true
+                break
+        when not duplicate:
+            kept.append(frame)
+    return kept
