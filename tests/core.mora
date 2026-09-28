@@ -1,0 +1,17 @@
+include "../src/geometry.mora"
+include "../src/emotion.mora"
+
+state.assist = "normal"
+
+let quad = [[10.0, 10.0], [110.0, 10.0], [110.0, 90.0], [10.0, 90.0]]
+assert is_valid_quad(quad)
+let moved = move_corner(quad, 0, 5.0, 7.0, 200, 200)
+assert moved[0] == [15.0, 17.0]
+assert moved[1] == [110.0, 10.0]
+
+repeat i in range(7):
+    affect("repeated_adjustment", 1.0)
+assert user.frustrated > 0.5
+assert state.assist in ["gentle", "strong"]
+
+print("core ok", user.snapshot(), state.assist)
