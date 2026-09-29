@@ -1,13 +1,46 @@
-# Scan Slicer Emo — application code is 100% Mora.
-# Native libraries enter only through Mora FFI modules.
-include "src/geometry.mora"
-include "src/emotion.mora"
-include "src/scanner.mora"
-include "src/vision.mora"
-include "src/ui.mora"
+language mora 0.3
 
-use adw
+bring "src/geometry.mora"
+bring "src/emotion.mora"
+bring "src/scanner.mora"
+bring "src/vision.mora"
+bring "src/ui.mora"
 
-state.app = adw.Application(application_id=APP_ID)
-state.app.connect("activate", build_ui)
-state.app.run([])
+app ScanSlicerEmo {
+    identity "com.github.ziacik.ScanSlicerEmo"
+
+    starts neutral
+
+    remembers {
+        scan        absent
+        frames      none
+        selection   absent
+        history     empty
+        padding     0px
+        view        fitted
+    }
+
+    seeks Editing
+
+    journey Editing {
+        toward user.confident
+        away from user.frustrated
+        away from user.uncertain
+
+        while no scan {
+            offer Empty
+        }
+
+        when scan arrives {
+            desire DetectPhotos
+        }
+
+        when user struggles with current frame {
+            offer PreciseEditing
+        }
+
+        when user flows {
+            withdraw PreciseEditing
+        }
+    }
+}
