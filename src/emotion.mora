@@ -1,68 +1,61 @@
 belief user about emotion {
-    confident   0.45
-    uncertain   0.20
-    frustrated  0.05
-
+    confident 0.45
+    uncertain 0.20
+    frustrated 0.05
     never certain
-    fades toward neutral over 45s
 }
 
-meaning correction(frame) {
-    suggests uncertain      gently
-    suggests frustrated     faintly
-    weakens confident       faintly
+meaning correction(item) {
+    suggests uncertain gently
+    suggests frustrated faintly
+    weakens confident faintly
 }
 
-meaning repeated correction(frame) within 12s {
-    suggests frustrated     strongly
-    suggests uncertain      moderately
+meaning repeated correction(item) within 12s {
+    suggests frustrated strongly
+    suggests uncertain moderately
 }
 
-meaning undo soon after correction {
-    suggests uncertain      strongly
-    suggests frustrated     moderately
+meaning undo within 12s after correction(item) {
+    suggests uncertain strongly
+    suggests frustrated moderately
 }
 
-meaning repeated redetection {
-    suggests uncertain      strongly
+meaning redetection {
+    suggests uncertain strongly
 }
 
-meaning detection succeeded and no correction for 20s {
-    suggests confident      strongly
-    weakens uncertain       moderately
+meaning detection-succeeded {
+    suggests confident gently
 }
 
-meaning export succeeded {
-    suggests confident      moderately
-    weakens frustrated      gently
+meaning export-succeeded {
+    suggests confident moderately
+    weakens frustrated gently
 }
 
 meaning failure {
-    suggests frustrated     moderately
-    suggests uncertain      gently
+    suggests frustrated moderately
+    suggests uncertain gently
 }
 
-pattern user struggles with frame {
-    repeated correction(frame)
-    or undo soon after correction(frame)
-    or correction(frame) after repeated redetection
+pattern user-struggles {
+    repeated correction(item) within 12s
+    or undo within 12s after correction(item)
 }
 
-pattern user flows {
-    confident dominates uncertain and frustrated
-    sustained for 8s
+pattern user-flows {
+    belief user.confident dominates user.uncertain user.frustrated for 8s
 }
 
 offer PreciseEditing {
-    magnifier     eager
-    handles       generous
-    snapping      strong
-    hints         subtle
+    magnifier eager
+    handles 11px
+    snapping 24px
 }
 
 withdraw PreciseEditing {
-    magnifier     only while dragging
-    handles       normal
-    snapping      gentle
-    hints         hidden
+    magnifier dragging
+    handles 7px
+    snapping 0px
 }
