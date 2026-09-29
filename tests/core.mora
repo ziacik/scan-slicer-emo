@@ -1,17 +1,36 @@
-include "../src/geometry.mora"
-include "../src/emotion.mora"
+language mora 0.3
 
-state.assist = "normal"
+bring "../src/geometry.mora"
+bring "../src/emotion.mora"
 
-let quad = [[10.0, 10.0], [110.0, 10.0], [110.0, 90.0], [10.0, 90.0]]
-assert is_valid_quad(quad)
-let moved = move_corner(quad, 0, 5.0, 7.0, 200, 200)
-assert moved[0] == [15.0, 17.0]
-assert moved[1] == [110.0, 10.0]
+scenario "repeated correction creates evidence, not certainty" {
+    given user is near neutral
+    given frame A is valid EditableFrame
 
-repeat i in range(7):
-    affect("repeated_adjustment", 1.0)
-assert user.frustrated > 0.5
-assert state.assist in ["gentle", "strong"]
+    perceive correction(A)
+    perceive correction(A)
+    perceive correction(A)
 
-print("core ok", user.snapshot(), state.assist)
+    expect user.frustrated rose
+    expect user.uncertain rose
+    expect user belief remains uncertain
+    expect pattern user struggles with A may hold
+}
+
+scenario "successful flow withdraws intrusive help" {
+    given PreciseEditing is offered
+    given user.confident dominates for 8s
+
+    perceive user flows
+
+    expect PreciseEditing withdrawn
+}
+
+scenario "geometry is constrained by laws" {
+    given frame A is valid EditableFrame
+
+    attempt move corner of A outside scan
+
+    expect EditableFrame still holds
+    expect A remains convex
+}
