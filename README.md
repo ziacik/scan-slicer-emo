@@ -81,15 +81,25 @@ src/
   ui.mora
 ```
 
-## Runtime status
+## Run
 
-The Mora 0.3 parser and affective engine exist now. They can validate this application and execute its belief/meaning model:
+Install Mora from [ziacik/mora](https://github.com/ziacik/mora). On Arch/Manjaro:
 
 ```bash
-mora check app.mora
-mora simulate app.mora 'correction(A)' 'correction(A)' 'correction(A)'
+sudo pacman -S python python-gobject gtk4 libadwaita python-pillow python-opencv python-requests sane libsecret
+git clone https://github.com/ziacik/mora.git
+cd mora
+./install.sh
 ```
 
-The GTK/faculty execution backend is the remaining runtime layer. Until that backend lands, `mora run app.mora` deliberately stops instead of secretly replacing the Mora source with hand-written Python/Rust application logic.
+Then:
 
-The app repository intentionally contains no implementation of native faculties. They belong below the Mora language boundary.
+```bash
+git clone https://github.com/ziacik/scan-slicer-emo.git
+cd scan-slicer-emo
+
+mora check app.mora
+mora run app.mora
+```
+
+The GTK/libadwaita, SANE, OpenCV, image, OpenAI and keyring implementations live in the Mora runtime as faculties. This repository remains application code written in Mora rather than a second implementation hidden in Python or Rust.
