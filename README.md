@@ -81,13 +81,15 @@ src/
   ui.mora
 ```
 
-## Run
+## Runtime status
 
-Requires a Mora 0.3 runtime with the faculties declared by this application.
+The Mora 0.3 parser and affective engine exist now. They can validate this application and execute its belief/meaning model:
 
 ```bash
 mora check app.mora
-mora run app.mora
+mora simulate app.mora 'correction(A)' 'correction(A)' 'correction(A)'
 ```
 
-The app repository intentionally contains no implementation of those native faculties. They belong to the Mora runtime, in the same way a language runtime provides I/O and platform bindings without making the application itself Python/Rust/C.
+The GTK/faculty execution backend is the remaining runtime layer. Until that backend lands, `mora run app.mora` deliberately stops instead of secretly replacing the Mora source with hand-written Python/Rust application logic.
+
+The app repository intentionally contains no implementation of native faculties. They belong below the Mora language boundary.
