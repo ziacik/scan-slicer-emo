@@ -1,13 +1,8 @@
 faculty desktop from gtk4 + libadwaita {
     can show Window
-    can show Header
     can show Sidebar
     can show Canvas
-    can show Toast
     can bind gestures
-    can render Image
-    can render Quad
-    can render Magnifier
 }
 
 scene Main {
@@ -17,112 +12,74 @@ scene Main {
         minimum 780 x 520
 
         header {
-            button Scan   icon scanner-symbolic       invites ScanImage
-            button Open   icon document-open-symbolic invites OpenScan
-            button Detect icon system-search-symbolic invites DetectPhotos
-
-            button Undo   icon edit-undo-symbolic     invites Undo
-            button Redo   icon edit-redo-symbolic     invites Redo
-            button Fit    icon zoom-fit-best-symbolic invites FitView
-
-            button Export emphasized                  invites ExportPhotos
+            button Scan icon scanner-symbolic invites AcquireImage
+            button Open icon document-open-symbolic invites OpenImage
+            button Detect icon system-search-symbolic invites DetectRegions when scan.image exists
+            button Undo icon edit-undo-symbolic invites Undo
+            button Redo icon edit-redo-symbolic invites Redo
+            button Fit icon zoom-fit-best-symbolic invites FitView when scan.image exists
+            button Export emphasized invites ExportRegions when regions not empty
         }
 
         sidebar {
             group "Source" {
-                show scan.source or "No scan loaded"
-                show scan.dimensions when scan exists
+                value scan.source label "Source" fallback "No scan loaded"
+                value dimensions(scan.image) label "Dimensions" when scan.image exists
             }
-
-            group "Frames" {
-                show count(frames)
-                button Add    invites AddFrame
-                button Delete invites DeleteFrame when selection exists
-                show selection.dimensions when selection exists
+            group "Regions" {
+                value count(regions) label "Detected regions"
+                button Add invites AddRegion when scan.image exists
+                button Delete invites DeleteRegion when selection exists
+                value dimensions(item-at(regions, selection)) label "Selected region" when selection exists
             }
-
             group "Crop" {
-                control padding from 0px to 100px
+                number padding 0..100 label "Padding"
             }
-
-            group "Adaptive assistance" {
-                reveal user belief only as {
-                    "Normal assistance" when user flows
-                    "Precise assistance" when user struggles with current frame
-                    "Learning your editing rhythm" otherwise
-                }
-            }
-
             group "View" {
-                show view.zoom
+                value percent(view.zoom) label "Zoom"
             }
-
-            tell latest message
         }
 
         canvas Editor {
-            background follows system theme
+            image scan.image
+            shapes regions as quads
+            focus selection
+            view view
+            adapt with PreciseEditing
 
-            when no scan {
-                offer Empty {
-                    icon scanner-symbolic
-                    title "Open or scan an image"
-                    action "Scan from Scanner…" invites ScanImage
-                    action "Open Image…" invites OpenScan
-                }
+            empty when scan.image absent {
+                icon scanner-symbolic
+                title "Open or scan an image"
+                action "Scan from Scanner…" invites AcquireImage
+                action "Open Image…" invites OpenImage
             }
 
-            when scan exists {
-                show scan.image fitted through view
-                overlay every frame as quadrilateral
-
-                focused frame {
-                    handles on corners
-                    handles on edges
-
-                    handle size responds to Editing
-                    snapping responds to Editing
-                }
-
-                gesture click frame {
-                    focus frame
-                }
-
-                gesture drag empty-space {
-                    pan view
-                }
-
-                gesture drag unfocused frame {
-                    focus frame
-                    pan view
-                }
-
-                gesture drag focused frame {
-                    move frame respecting EditableFrame
-                }
-
-                gesture drag focused frame.corner {
-                    move corner respecting EditableFrame
-                }
-
-                gesture drag focused frame.edge {
-                    move edge preserving vector
-                    respecting EditableFrame
-                }
-
-                gesture wheel {
-                    zoom view around pointer
-                    perceive zooming
-                }
-
-                while dragging and PreciseEditing offered {
-                    show Magnifier around pointer
-                }
+            gesture click shape {
+                focus touched
+            }
+            gesture drag empty {
+                pan view
+            }
+            gesture drag unfocused shape {
+                focus touched
+                pan view
+            }
+            gesture drag focused shape {
+                use geometry.move
+                perceive correction(item) on finish
+            }
+            gesture drag focused corner {
+                use geometry.move-corner
+                perceive correction(item) on finish
+            }
+            gesture drag focused edge {
+                use geometry.move-edge
+                perceive correction(item) on finish
+            }
+            gesture wheel {
+                zoom view
+                perceive zooming
             }
         }
     }
-}
-
-when app starts {
-    present Main
 }
