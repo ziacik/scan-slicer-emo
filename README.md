@@ -1,72 +1,58 @@
 # Scan Slicer Emo
 
-A real application written in **Mora 0.3**, an affective programming language.
+A full GTK4/libadwaita application written in **Mora 0.4**.
 
-The important bit is not the file extension. The application is expressed in Mora's own primitives: **beliefs, meanings, patterns, desires, journeys, offers, perceptions and laws**. There are no user-defined `fn` functions, callback wiring, mutable `state.foo` assignments, or hand-written GTK control flow in the app.
+The application contains the domain logic. Mora itself does not know what a photo, region, scan, detection desire, export desire, or Scan Slicer is.
 
-Native libraries are exposed to Mora as **faculties**. GTK/libadwaita can render a scene, OpenCV can perform a perspective crop, SANE can acquire a scan, and OpenAI can act as a vision faculty. The application decides *what it wants and how evidence should change its behaviour*.
+## What lives here
 
-## Example
+- the `PhysicalPhoto` concept and OpenAI prompt
+- detection thresholds and dedupe settings
+- scanner/open/export workflows
+- application state such as `scan`, `regions`, `selection`, and `padding`
+- UI scene, buttons, gestures, and adaptive editing behavior
+- the emotional evidence model
+
+For example:
 
 ```mora
-journey Editing {
-    toward user.confident
-    away from user.frustrated
-
-    when user struggles with current frame {
-        offer PreciseEditing
-    }
-
-    when user flows {
-        withdraw PreciseEditing
-    }
+concept PhysicalPhoto {
+    describe "Detect only separate physical photographic prints ..."
+    result list of Quad
 }
 ```
 
-The emotion model is uncertain by design:
+and:
 
 ```mora
-belief user about emotion {
-    confident   0.45
-    uncertain   0.20
-    frustrated  0.05
-
-    never certain
-    fades toward neutral over 45s
+desire DetectRegions {
+    requires scan.image
+    attempt vision.perceive scan.image PhysicalPhoto as candidates
+    attempt geometry.filter candidates scan.image 0.04 0.003 0.80 3 0.02 as candidates
+    attempt geometry.dedupe candidates 0.85 as candidates
+    remember regions as candidates
 }
 ```
 
-Interaction evidence changes that belief:
+Mora only provides generic execution verbs and faculties.
 
-```mora
-meaning repeated correction(frame) within 12s {
-    suggests frustrated strongly
-    suggests uncertain moderately
-}
+## Install
+
+On Arch/Manjaro:
+
+```bash
+sudo pacman -S python python-gobject gtk4 libadwaita python-pillow python-opencv python-requests sane libsecret
+
+git clone https://github.com/ziacik/mora.git
+cd mora
+sh install.sh
+
+cd ..
+git clone https://github.com/ziacik/scan-slicer-emo.git
+cd scan-slicer-emo
+mora check app.mora
+mora run app.mora
 ```
-
-The UI itself is declarative:
-
-```mora
-gesture drag focused frame.edge {
-    move edge preserving vector
-    respecting EditableFrame
-}
-```
-
-## Application features
-
-- GTK4/libadwaita desktop UI
-- PNG/JPEG/TIFF opening
-- SANE scanning
-- OpenAI physical-photo detection
-- system-keyring API key
-- skewed/rotated quadrilateral frames
-- corner, edge and whole-frame editing
-- pan/zoom
-- undo/redo
-- perspective-correct full-resolution export
-- adaptive magnifier, handles and snapping driven by the affective journey
 
 ## Source layout
 
@@ -75,31 +61,8 @@ app.mora
 src/
   emotion.mora
   geometry.mora
-  scanner.mora
+  io.mora
   vision.mora
   editor.mora
   ui.mora
 ```
-
-## Run
-
-Install Mora from [ziacik/mora](https://github.com/ziacik/mora). On Arch/Manjaro:
-
-```bash
-sudo pacman -S python python-gobject gtk4 libadwaita python-pillow python-opencv python-requests sane libsecret
-git clone https://github.com/ziacik/mora.git
-cd mora
-sh install.sh
-```
-
-Then:
-
-```bash
-git clone https://github.com/ziacik/scan-slicer-emo.git
-cd scan-slicer-emo
-
-mora check app.mora
-mora run app.mora
-```
-
-The GTK/libadwaita, SANE, OpenCV, image, OpenAI and keyring implementations live in the Mora runtime as faculties. This repository remains application code written in Mora rather than a second implementation hidden in Python or Rust.
