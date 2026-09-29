@@ -1,112 +1,47 @@
-faculty files from desktop {
-    can choose image-file matching ["png", "jpg", "jpeg", "tif", "tiff"]
-    can choose folder
+desire AddRegion {
+    requires scan.image
+    attempt geometry.centered-quad scan.image 0.33 0.33 as region
+    snapshot regions selection into history
+    add region to regions
+    remember selection as last-index regions
 }
 
-faculty images from image-codec {
-    can load Image from file
-    can save Image as png to file
-}
-
-desire OpenScan {
-    ask user for image-file through files
-
-    fulfilled with file {
-        attempt images.load file
-
-        fulfilled with image {
-            remember scan as {
-                image   image
-                source  file
-            }
-            forget frames
-            forget selection
-            forget history
-            perceive scan arrived
-        }
-
-        thwarted by error {
-            perceive failure named "open" carrying error
-            tell user "Could not open image"
-        }
-    }
-}
-
-desire AddFrame {
-    requires scan
-
-    imagine frame centered in scan
-        width one third of scan
-        height one third of scan
-
-    remember current world in history
-    add imagined frame to frames
-    focus imagined frame
-    perceive user added missing frame
-}
-
-desire DeleteFrame {
+desire DeleteRegion {
     requires selection
-
-    remember current world in history
-    remove selection from frames
-    perceive user deletes detected frame
+    snapshot regions selection into history
+    remove-index selection from regions
     forget selection
 }
 
 desire Undo {
-    requires history has past
-
-    restore previous world
-    perceive undo soon after correction when recent correction exists
+    restore previous regions selection from history
+    perceive undo
 }
 
 desire Redo {
-    requires history has future
-    restore next world
+    restore next regions selection from history
 }
 
 desire FitView {
-    make view fitted
+    remember view as fitted
 }
 
-desire ExportPhotos {
-    requires scan
-    requires frames not empty
-
-    ask user for folder through files
-
-    fulfilled with folder {
-        attempt {
-            for every frame in frames
-                perspective-crop scan.image through frame
-                save as png into folder numbered by visual order
-        }
-
-        fulfilled {
-            perceive export succeeded
-            tell user "Export finished"
-        }
-
-        thwarted by error {
-            perceive failure named "export" carrying error
-            tell user "Export failed"
-        }
+desire ExportRegions {
+    requires scan.image
+    requires regions not empty
+    ask files.choose-folder as folder {
+        title "Export photos"
     }
-}
+    for every region in regions {
+        attempt geometry.perspective-crop scan.image region as crop
+        attempt files.numbered-path folder scan.source index png as target
+        attempt images.save crop target
+    }
+    perceive export-succeeded
+    tell user "Export finished"
 
-when user begins moving selected frame {
-    remember current world in history
-}
-
-when user finishes moving frame {
-    perceive correction(frame)
-}
-
-when user finishes moving corner of frame {
-    perceive correction(frame)
-}
-
-when user finishes moving edge of frame {
-    perceive correction(frame)
+    on failure {
+        perceive failure
+        tell user "Export failed"
+    }
 }
