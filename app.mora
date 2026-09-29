@@ -1,24 +1,23 @@
-language mora 0.3
+language mora 0.4
 
-bring "src/geometry.mora"
 bring "src/emotion.mora"
-bring "src/scanner.mora"
+bring "src/geometry.mora"
+bring "src/io.mora"
 bring "src/vision.mora"
 bring "src/editor.mora"
 bring "src/ui.mora"
 
 app ScanSlicerEmo {
     identity "com.github.ziacik.ScanSlicerEmo"
-
     starts neutral
 
     remembers {
-        scan        absent
-        frames      none
-        selection   absent
-        history     empty
-        padding     0px
-        view        fitted
+        scan absent
+        regions empty
+        selection absent
+        history absent
+        padding 0
+        view fitted
     }
 
     seeks Editing
@@ -28,19 +27,15 @@ app ScanSlicerEmo {
         away from user.frustrated
         away from user.uncertain
 
-        while no scan {
-            offer Empty
+        when document-arrived {
+            desire DetectRegions
         }
 
-        when scan arrives {
-            desire DetectPhotos
-        }
-
-        when user struggles with current frame {
+        when user-struggles {
             offer PreciseEditing
         }
 
-        when user flows {
+        when user-flows {
             withdraw PreciseEditing
         }
     }
