@@ -1,44 +1,24 @@
-use subprocess
-use tempfile
-use os
-use image
+faculty scanner from sane {
+    can discover scanners
+    can acquire Image from Scanner at Dpi
+}
 
-fn list_scanners():
-    let result = subprocess.run(["scanimage", "-L"], capture_output=true, text=true, check=false)
-    when result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "Could not list scanners")
-    let devices = []
-    repeat raw in result.stdout.splitlines():
-        let line = raw.strip()
-        when not line.startswith("device `") and not line.startswith("device '"):
-            continue
-        let quote = "'"
-        let rest = line[8:]
-        let end = rest.find(quote)
-        when end < 0:
-            continue
-        let ident = rest[:end].strip()
-        let desc = rest[end + 1:].strip()
-        when desc.startswith("is a "):
-            desc = desc[5:]
-        devices.append({"id": ident, "label": desc or ident})
-    return devices
+desire ScanImage {
+    ask user for scanner among scanner.discover
+    ask user for dpi default 600
 
-fn scan_image(device_id, resolution=600):
-    let fd, path = tempfile.mkstemp(prefix="scan-slicer-emo-", suffix=".png")
-    os.close(fd)
-    try:
-        let result = subprocess.run([
-            "scanimage", "-d", device_id, "--format=png", "--mode", "Color",
-            "--resolution", str(resolution), "-o", path
-        ], capture_output=true, text=true, check=false)
-        when result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "Scanner returned an error")
-        let loaded = image.open(path).convert("RGBA")
-        loaded.load()
-        return loaded
-    finally:
-        try:
-            os.remove(path)
-        except FileNotFoundError:
-            pass
+    attempt scanner.acquire chosen scanner at chosen dpi
+
+    fulfilled with image {
+        remember scan as {
+            image  image
+            source scanner
+        }
+        perceive scan arrived
+    }
+
+    thwarted by error {
+        perceive failure named "scan" carrying error
+        tell user "Scan failed"
+    }
+}
