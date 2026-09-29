@@ -1,28 +1,25 @@
 faculty geometry from opencv {
-    shape Quad = four Points clockwise
-
-    can perspective-crop Image through Quad -> Image
-    can move Quad by Vector within Image
-    can move corner of Quad by Vector within Image
-    can move edge of Quad by Vector within Image
-    can expand Quad by Pixels within Image
-    can test Point inside Quad
+    can centered-quad Image WidthFraction HeightFraction -> Quad
+    can expand-each Quads Pixels Image -> Quads
+    can perspective-crop Image Quad -> Image
+    can move Quad Dx Dy Image -> Quad
+    can move-corner Quad Corner Dx Dy Image Snap -> Quad
+    can move-edge Quad Edge Dx Dy Image Snap -> Quad
+    can filter Quads Image MinSide MinArea MaxArea MaxTouchedEdges EdgeFraction -> Quads
+    can dedupe Quads Threshold -> Quads
+    can sort-visual Quads RowHeight -> Quads
+    can bounds Quad -> Rect
+    can contains Point Quad -> Bool
 }
 
-law EditableFrame {
-    corners form convex Quad
+law EditableRegion {
+    shape is convex Quad
     every edge longer than 20px
-    every corner remains inside scan
-    dragging an edge preserves that edge vector
-    dragging whole frame preserves its shape
+    every point remains inside source image
+    moving an edge preserves its vector
 }
 
 preference SafeCrop {
-    losing original photo pixels hurts strongly
+    losing source pixels hurts strongly
     keeping narrow scanner background hurts faintly
-}
-
-when frame changes {
-    enforce EditableFrame
-    prefer SafeCrop
 }
