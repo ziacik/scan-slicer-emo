@@ -1,56 +1,33 @@
 faculty vision from openai.responses {
     model "gpt-5.6-terra"
-
     secret api-key in system-keyring
-    ask-user when missing
+    secret-label "OpenAI API key"
+    secret-help "Photo detection uses your OpenAI API key. It is stored in the system keyring."
+    secret-link "https://platform.openai.com/api-keys"
 }
 
 concept PhysicalPhoto {
-    a separate photographic print lying on the scanned surface
-    not content depicted inside a photograph
-    not the scanner or page boundary
-
-    has four outer corners
-    may be faded, damaged, low-contrast or rotated
+    describe "Detect only separate physical photographic prints lying on the scanned surface. Do not detect people, faces, objects, frames, buildings, trees, or other content inside a photograph. Do not return the scanner or page boundary. Include faded, low-contrast, black-and-white, damaged, and slightly rotated prints. Return no object unless it is itself a physical photo print."
+    result list of Quad
 }
 
-desire DetectPhotos {
-    requires scan
-
-    ask vision to perceive PhysicalPhoto in scan.image {
+desire DetectRegions {
+    requires scan.image
+    perceive redetection when regions not empty
+    attempt vision.perceive scan.image PhysicalPhoto as candidates {
         detail high
-        coordinates normalized 0..1000
-        corners clockwise from visually top-left
     }
+    attempt geometry.filter candidates scan.image 0.04 0.003 0.80 3 0.02 as candidates
+    attempt geometry.dedupe candidates 0.85 as candidates
+    attempt geometry.sort-visual candidates 40 as candidates
+    attempt geometry.expand-each candidates padding scan.image as candidates
+    remember regions as candidates
+    forget selection
+    clear history
+    perceive detection-succeeded
 
-    trust vision at 0.72
-
-    fulfilled with candidates {
-        believe frames are candidates
-        expanded by padding
-        rejecting scanner-boundary lookalikes
-        merging near-duplicates
-
-        remember frames
-        forget selection
-        perceive detection succeeded
-    }
-
-    thwarted by error {
-        perceive failure named "detection" carrying error
+    on failure {
+        perceive failure
         tell user "Photo detection failed"
     }
-}
-
-when user corrects frame {
-    lower trust in that frame
-}
-
-when user deletes detected frame {
-    strongly lower trust in that frame
-}
-
-when user adds missing frame {
-    perceive vision omission
-    lower trust in current detection moderately
 }
