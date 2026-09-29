@@ -4,6 +4,7 @@ bring "src/geometry.mora"
 bring "src/emotion.mora"
 bring "src/scanner.mora"
 bring "src/vision.mora"
+bring "src/editor.mora"
 bring "src/ui.mora"
 
 app ScanSlicerEmo {
