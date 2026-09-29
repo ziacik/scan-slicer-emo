@@ -89,7 +89,7 @@ Install Mora from [ziacik/mora](https://github.com/ziacik/mora). On Arch/Manjaro
 sudo pacman -S python python-gobject gtk4 libadwaita python-pillow python-opencv python-requests sane libsecret
 git clone https://github.com/ziacik/mora.git
 cd mora
-./install.sh
+sh install.sh
 ```
 
 Then:
