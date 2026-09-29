@@ -1,780 +1,128 @@
-use gtk
-use adw
-use gdk
-use gdkpixbuf
-use glib
-use io
-use image
-use copy
-use dialogs
-use background
-use secret
-use math
-use os
+faculty desktop from gtk4 + libadwaita {
+    can show Window
+    can show Header
+    can show Sidebar
+    can show Canvas
+    can show Toast
+    can bind gestures
+    can render Image
+    can render Quad
+    can render Magnifier
+}
 
-state.image = none
-state.preview = none
-state.preview_ratio = 1.0
-state.image_path = none
-state.frames = []
-state.selected = none
-state.drag = none
-state.pan_start = none
-state.pan_x = 0.0
-state.pan_y = 0.0
-state.zoom = 1.0
-state.margin = 0
-state.busy = false
-state.status = "Open an image or scan one to begin."
-state.assist = "normal"
-state.hover_x = 0.0
-state.hover_y = 0.0
-state.undo = []
-state.redo = []
-state.adjustment_streak = 0
-state.last_adjusted = none
-state.ui = none
+scene Main {
+    window {
+        title "Scan Slicer Emo"
+        size 1200 x 820
+        minimum 780 x 520
 
-APP_ID = "com.github.ziacik.ScanSlicerEmo"
-SECRET_KIND = "openai-api-key"
+        header {
+            button Scan   icon scanner-symbolic       invites ScanImage
+            button Open   icon document-open-symbolic invites OpenScan
+            button Detect icon system-search-symbolic invites DetectPhotos
 
-fn make_preview(pil_image):
-    let thumb = pil_image.copy()
-    thumb.thumbnail((2400, 2400), image.Image.Resampling.LANCZOS)
-    let buf = io.BytesIO()
-    thumb.convert("RGBA").save(buf, format="PNG")
-    let loader = gdkpixbuf.PixbufLoader.new_with_type("png")
-    loader.write(buf.getvalue())
-    loader.close()
-    let pixbuf = loader.get_pixbuf()
-    return pixbuf, float(pixbuf.get_width()) / float(pil_image.size[0])
+            button Undo   icon edit-undo-symbolic     invites Undo
+            button Redo   icon edit-redo-symbolic     invites Redo
+            button Fit    icon zoom-fit-best-symbolic invites FitView
 
-fn set_busy(value, message=none):
-    state.busy = value
-    when message is not none:
-        state.status = message
-    refresh_ui()
-
-fn toast(text):
-    when state.ui is not none:
-        state.ui.toast.add_toast(adw.Toast.new(text))
-
-fn push_undo():
-    state.undo.append({"frames": copy.deepcopy(state.frames), "selected": state.selected})
-    when len(state.undo) > 100:
-        state.undo.pop(0)
-    state.redo = []
-
-fn undo_edit(button=none):
-    when not state.undo or state.busy:
-        return
-    state.redo.append({"frames": copy.deepcopy(state.frames), "selected": state.selected})
-    let snap = state.undo.pop()
-    state.frames = snap["frames"]
-    state.selected = snap["selected"]
-    state.status = "Undid edit."
-    affect("undo")
-    refresh_ui()
-    state.ui.drawing.queue_draw()
-
-fn redo_edit(button=none):
-    when not state.redo or state.busy:
-        return
-    state.undo.append({"frames": copy.deepcopy(state.frames), "selected": state.selected})
-    let snap = state.redo.pop()
-    state.frames = snap["frames"]
-    state.selected = snap["selected"]
-    state.status = "Redid edit."
-    affect("redo")
-    refresh_ui()
-    state.ui.drawing.queue_draw()
-
-fn open_scan(button=none):
-    when state.busy:
-        return
-    dialogs.open_file(state.ui.window, "Open scan", ["*.png", "*.jpg", "*.jpeg", "*.tif", "*.tiff"], load_path)
-
-fn load_path(path):
-    when path is none:
-        return
-    set_busy(true, "Loading " + path + "…")
-    fn work():
-        let loaded = image.open(path).convert("RGBA")
-        loaded.load()
-        return loaded
-    fn done(value, error):
-        when error is not none:
-            set_busy(false, "Could not open image: " + str(error))
-            toast("Could not open image")
-            return
-        state.image = value
-        state.image_path = path
-        state.preview, state.preview_ratio = make_preview(value)
-        reset_document_state()
-        state.status = "Loaded " + os.path.basename(path)
-        refresh_ui()
-        state.ui.drawing.queue_draw()
-        detect_photos()
-    background.run(work, done)
-
-fn reset_document_state():
-    state.frames = []
-    state.selected = none
-    state.drag = none
-    state.pan_start = none
-    state.pan_x = 0.0
-    state.pan_y = 0.0
-    state.zoom = 1.0
-    state.undo = []
-    state.redo = []
-    state.adjustment_streak = 0
-    state.last_adjusted = none
-    calm(user, 0.15)
-    update_assistance()
-
-fn show_api_key_dialog(after_save=none):
-    let dialog = gtk.Dialog(title="OpenAI API key", transient_for=state.ui.window, modal=true)
-    dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
-    dialog.add_button("Save", gtk.ResponseType.OK)
-    let box = dialog.get_content_area()
-    box.set_spacing(12)
-    box.set_margin_top(18)
-    box.set_margin_bottom(18)
-    box.set_margin_start(18)
-    box.set_margin_end(18)
-    let label = gtk.Label(label="Photo detection uses your own OpenAI API key. It is stored in the system keyring.")
-    label.set_wrap(true)
-    label.set_xalign(0.0)
-    let entry = gtk.PasswordEntry()
-    entry.set_show_peek_icon(true)
-    let current = secret.get(APP_ID, SECRET_KIND)
-    when current is not none:
-        entry.set_text(current)
-    let link = gtk.LinkButton.new_with_label("https://platform.openai.com/api-keys", "Create an API key…")
-    link.set_halign(gtk.Align.START)
-    box.append(label)
-    box.append(entry)
-    box.append(link)
-    fn response(dlg, code):
-        when code == gtk.ResponseType.OK:
-            let value = entry.get_text().strip()
-            when value:
-                try:
-                    secret.set(APP_ID, SECRET_KIND, value, "Scan Slicer Emo OpenAI API key")
-                    state.status = "OpenAI API key saved."
-                    toast("API key saved")
-                    when after_save is not none:
-                        after_save()
-                except Exception as error:
-                    state.status = "Could not save API key: " + str(error)
-                    toast("Could not save API key")
-        dlg.destroy()
-        refresh_ui()
-    dialog.connect("response", response)
-    dialog.present()
-
-fn detect_photos(button=none):
-    when state.image is none or state.busy:
-        return
-    let api_key = secret.get(APP_ID, SECRET_KIND)
-    when api_key is none:
-        show_api_key_dialog(detect_photos)
-        return
-    when state.frames:
-        affect("redetect")
-    set_busy(true, "Detecting physical photos…")
-    let source = state.image.copy()
-    let margin = state.margin
-    fn work():
-        return detect_photos_openai(source, api_key, margin)
-    fn done(value, error):
-        when error is not none:
-            set_busy(false, "Detection failed: " + str(error))
-            affect("detect_failure")
-            toast("Photo detection failed")
-            state.ui.drawing.queue_draw()
-            return
-        state.frames = value
-        state.selected = none
-        state.undo = []
-        state.redo = []
-        state.status = "Detected " + str(len(value)) + " photo" + ("." if len(value) == 1 else "s.")
-        state.busy = false
-        affect("detect_success")
-        toast("Photos detected")
-        refresh_ui()
-        state.ui.drawing.queue_draw()
-    background.run(work, done)
-
-fn scan_from_scanner(button=none):
-    when state.busy:
-        return
-    set_busy(true, "Looking for scanners…")
-    fn done(devices, error):
-        state.busy = false
-        when error is not none:
-            state.status = "Could not list scanners: " + str(error)
-            refresh_ui()
-            toast("Scanner unavailable")
-            return
-        when not devices:
-            state.status = "No SANE scanners found."
-            refresh_ui()
-            toast("No scanner found")
-            return
-        show_scanner_dialog(devices)
-    background.run(list_scanners, done)
-
-fn show_scanner_dialog(devices):
-    let dialog = gtk.Dialog(title="Scan from scanner", transient_for=state.ui.window, modal=true)
-    dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
-    dialog.add_button("Scan", gtk.ResponseType.OK)
-    let box = dialog.get_content_area()
-    box.set_spacing(12)
-    box.set_margin_top(18)
-    box.set_margin_bottom(18)
-    box.set_margin_start(18)
-    box.set_margin_end(18)
-    let names = [d["label"] for d in devices]
-    let strings = gtk.StringList.new(names)
-    let dropdown = gtk.DropDown(model=strings)
-    let dpi = gtk.SpinButton.new_with_range(75.0, 1200.0, 25.0)
-    dpi.set_value(600.0)
-    box.append(gtk.Label(label="Scanner"))
-    box.append(dropdown)
-    box.append(gtk.Label(label="Resolution (DPI)"))
-    box.append(dpi)
-    fn response(dlg, code):
-        when code == gtk.ResponseType.OK:
-            let index = int(dropdown.get_selected())
-            let device = devices[index]
-            let resolution = int(dpi.get_value())
-            dlg.destroy()
-            run_scan(device, resolution)
-            return
-        dlg.destroy()
-    dialog.connect("response", response)
-    dialog.present()
-
-fn run_scan(device, resolution):
-    set_busy(true, "Scanning at " + str(resolution) + " DPI…")
-    fn work():
-        return scan_image(device["id"], resolution)
-    fn done(value, error):
-        when error is not none:
-            set_busy(false, "Scan failed: " + str(error))
-            toast("Scan failed")
-            return
-        state.image = value
-        state.image_path = none
-        state.preview, state.preview_ratio = make_preview(value)
-        reset_document_state()
-        state.status = "Scanned from " + device["label"] + "."
-        refresh_ui()
-        state.ui.drawing.queue_draw()
-        toast("Scan complete")
-        detect_photos()
-    background.run(work, done)
-
-fn add_frame(button=none):
-    when state.image is none or state.busy:
-        return
-    push_undo()
-    let w, h = state.image.size
-    let fw = max(100.0, w / 3.0)
-    let fh = max(100.0, h / 3.0)
-    let x = (w - fw) / 2.0
-    let y = (h - fh) / 2.0
-    state.frames.append({"corners": [[x, y], [x + fw, y], [x + fw, y + fh], [x, y + fh]]})
-    state.selected = len(state.frames) - 1
-    state.status = "Added a frame."
-    affect("frame_added")
-    refresh_ui()
-    state.ui.drawing.queue_draw()
-
-fn delete_frame(button=none):
-    when state.selected is none or state.busy:
-        return
-    push_undo()
-    state.frames.pop(state.selected)
-    state.selected = none
-    state.status = "Deleted frame."
-    affect("frame_deleted")
-    refresh_ui()
-    state.ui.drawing.queue_draw()
-
-fn export_frames(button=none):
-    when state.image is none or not state.frames or state.busy:
-        return
-    dialogs.select_folder(state.ui.window, "Export photos", export_to)
-
-fn export_to(folder):
-    when folder is none:
-        return
-    set_busy(true, "Exporting " + str(len(state.frames)) + " photos…")
-    let source = state.image.copy()
-    let frames = copy.deepcopy(state.frames)
-    let stem = "scan"
-    when state.image_path is not none:
-        stem = os.path.splitext(os.path.basename(state.image_path))[0]
-    fn work():
-        let count = 0
-        repeat index in range(len(frames)):
-            let crop = perspective_crop(source, frames[index]["corners"])
-            let out = os.path.join(folder, stem + "_" + str(index + 1).zfill(2) + ".png")
-            crop.save(out, format="PNG")
-            count += 1
-        return count
-    fn done(value, error):
-        when error is not none:
-            set_busy(false, "Export failed: " + str(error))
-            affect("export_failure")
-            toast("Export failed")
-            return
-        state.busy = false
-        state.status = "Exported " + str(value) + " photos to " + folder
-        affect("export_success")
-        toast("Export finished")
-        refresh_ui()
-    background.run(work, done)
-
-fn fit_view(button=none):
-    state.zoom = 1.0
-    state.pan_x = 0.0
-    state.pan_y = 0.0
-    state.ui.drawing.queue_draw()
-    refresh_ui()
-
-fn view_transform(width, height):
-    when state.preview is none:
-        return none
-    let pw = float(state.preview.get_width())
-    let ph = float(state.preview.get_height())
-    let fit = min(max(1.0, width) / pw, max(1.0, height) / ph)
-    let scale = fit * state.zoom
-    return {
-        "scale": scale,
-        "full_scale": scale * state.preview_ratio,
-        "x": (width - pw * scale) * 0.5 + state.pan_x,
-        "y": (height - ph * scale) * 0.5 + state.pan_y
-    }
-
-fn image_to_screen(point, transform):
-    return [transform["x"] + point[0] * transform["full_scale"], transform["y"] + point[1] * transform["full_scale"]]
-
-fn screen_to_image(point, transform):
-    return [(point[0] - transform["x"]) / transform["full_scale"], (point[1] - transform["y"]) / transform["full_scale"]]
-
-fn screen_distance(a, b):
-    return math.hypot(a[0] - b[0], a[1] - b[1])
-
-fn hit_test(x, y):
-    when state.preview is none:
-        return none
-    let t = view_transform(state.ui.drawing.get_width(), state.ui.drawing.get_height())
-    let radius = assist_handle_radius() + 4.0
-    when state.selected is not none and state.selected < len(state.frames):
-        let points = [image_to_screen(p, t) for p in state.frames[state.selected]["corners"]]
-        repeat i in range(4):
-            when screen_distance([x, y], points[i]) <= radius:
-                return [state.selected, "corner", i]
-        let edges = [[0,1],[1,2],[2,3],[3,0]]
-        repeat i in range(4):
-            let mid = midpoint(points[edges[i][0]], points[edges[i][1]])
-            when screen_distance([x, y], mid) <= radius:
-                return [state.selected, "edge", i]
-    let image_point = screen_to_image([x, y], t)
-    repeat reverse_index in range(len(state.frames)):
-        let i = len(state.frames) - 1 - reverse_index
-        when point_in_quad(image_point, state.frames[i]["corners"]):
-            return [i, "move", none]
-    return none
-
-fn draw_path(cr, points):
-    cr.move_to(points[0][0], points[0][1])
-    repeat p in points[1:]:
-        cr.line_to(p[0], p[1])
-    cr.close_path()
-
-fn draw_canvas(area, cr, width, height):
-    when state.preview is none:
-        return
-    let t = view_transform(width, height)
-    cr.save()
-    cr.translate(t["x"], t["y"])
-    cr.scale(t["scale"], t["scale"])
-    gdk.cairo_set_source_pixbuf(cr, state.preview, 0.0, 0.0)
-    cr.paint()
-    cr.restore()
-
-    repeat i in range(len(state.frames)):
-        let points = [image_to_screen(p, t) for p in state.frames[i]["corners"]]
-        draw_path(cr, points)
-        when i == state.selected:
-            cr.set_source_rgba(0.20, 0.65, 1.0, 0.95)
-            cr.set_line_width(2.5)
-        otherwise:
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.82)
-            cr.set_line_width(1.6)
-        cr.stroke()
-
-        when i == state.selected:
-            let radius = assist_handle_radius()
-            repeat p in points:
-                cr.arc(p[0], p[1], radius, 0.0, math.pi * 2.0)
-                cr.set_source_rgba(0.20, 0.65, 1.0, 1.0)
-                cr.fill()
-            let edges = [[0,1],[1,2],[2,3],[3,0]]
-            repeat edge in edges:
-                let mid = midpoint(points[edge[0]], points[edge[1]])
-                cr.arc(mid[0], mid[1], max(4.0, radius - 2.0), 0.0, math.pi * 2.0)
-                cr.set_source_rgba(0.20, 0.65, 1.0, 1.0)
-                cr.fill()
-
-    when state.drag is not none and state.assist != "normal":
-        draw_magnifier(cr, width, height)
-
-fn draw_magnifier(cr, width, height):
-    let t = view_transform(width, height)
-    let ip = screen_to_image([state.hover_x, state.hover_y], t)
-    let px = ip[0] * state.preview_ratio
-    let py = ip[1] * state.preview_ratio
-    let size = 150.0 if state.assist == "strong" else 120.0
-    let zoom = 5.0 if state.assist == "strong" else 3.5
-    let x = min(width - size - 12.0, max(12.0, state.hover_x + 24.0))
-    let y = min(height - size - 12.0, max(12.0, state.hover_y + 24.0))
-    cr.save()
-    cr.rectangle(x, y, size, size)
-    cr.clip()
-    cr.translate(x + size * 0.5 - px * zoom, y + size * 0.5 - py * zoom)
-    cr.scale(zoom, zoom)
-    gdk.cairo_set_source_pixbuf(cr, state.preview, 0.0, 0.0)
-    cr.paint()
-    cr.restore()
-    cr.rectangle(x, y, size, size)
-    cr.set_source_rgba(0.15, 0.55, 0.95, 1.0)
-    cr.set_line_width(2.0)
-    cr.stroke()
-    cr.move_to(x + size * 0.5 - 8.0, y + size * 0.5)
-    cr.line_to(x + size * 0.5 + 8.0, y + size * 0.5)
-    cr.move_to(x + size * 0.5, y + size * 0.5 - 8.0)
-    cr.line_to(x + size * 0.5, y + size * 0.5 + 8.0)
-    cr.stroke()
-
-fn on_motion(controller, x, y):
-    state.hover_x = x
-    state.hover_y = y
-    when state.drag is not none:
-        state.ui.drawing.queue_draw()
-
-fn on_drag_begin(gesture, x, y):
-    when state.image is none:
-        return
-    state.ui.drawing.grab_focus()
-    let hit = hit_test(x, y)
-    when hit is none:
-        state.selected = none
-        state.pan_start = [state.pan_x, state.pan_y]
-        state.drag = {"kind": "pan", "x": x, "y": y}
-    otherwise when state.selected == hit[0]:
-        push_undo()
-        state.drag = {
-            "kind": hit[1], "part": hit[2], "index": hit[0], "x": x, "y": y,
-            "frame": copy.deepcopy(state.frames[hit[0]])
+            button Export emphasized                  invites ExportPhotos
         }
-    otherwise:
-        # First drag on an unfocused frame focuses it; canvas still pans.
-        state.selected = hit[0]
-        state.pan_start = [state.pan_x, state.pan_y]
-        state.drag = {"kind": "pan", "x": x, "y": y}
-        affect("selection")
-    refresh_ui()
-    state.ui.drawing.queue_draw()
 
-fn on_drag_update(gesture, dx, dy):
-    when state.drag is none:
-        return
-    when state.drag["kind"] == "pan":
-        state.pan_x = state.pan_start[0] + dx
-        state.pan_y = state.pan_start[1] + dy
-        state.ui.drawing.queue_draw()
-        return
-    let index = state.drag["index"]
-    let t = view_transform(state.ui.drawing.get_width(), state.ui.drawing.get_height())
-    let ix = dx / t["full_scale"]
-    let iy = dy / t["full_scale"]
-    let points = state.drag["frame"]["corners"]
-    let w, h = state.image.size
-    let snap = assist_snap_radius()
-    when state.drag["kind"] == "move":
-        state.frames[index]["corners"] = move_quad(points, ix, iy, w, h)
-    otherwise when state.drag["kind"] == "corner":
-        state.frames[index]["corners"] = move_corner(points, state.drag["part"], ix, iy, w, h, snap)
-    otherwise when state.drag["kind"] == "edge":
-        let pairs = [[0,1],[1,2],[2,3],[3,0]]
-        let pair = pairs[state.drag["part"]]
-        state.frames[index]["corners"] = move_edge(points, pair[0], pair[1], ix, iy, w, h, snap)
-    state.ui.drawing.queue_draw()
+        sidebar {
+            group "Source" {
+                show scan.source or "No scan loaded"
+                show scan.dimensions when scan exists
+            }
 
-fn on_drag_end(gesture, dx, dy):
-    when state.drag is none:
-        return
-    let kind = state.drag["kind"]
-    let index = state.drag.get("index")
-    state.drag = none
-    state.pan_start = none
-    when kind != "pan":
-        when state.last_adjusted == index:
-            state.adjustment_streak += 1
-        otherwise:
-            state.adjustment_streak = 1
-            state.last_adjusted = index
-        affect("edge_drag" if kind == "edge" else "corner_drag")
-        when state.adjustment_streak >= 3:
-            affect("repeated_adjustment", min(2.0, state.adjustment_streak / 3.0))
-        state.status = "Adjusted frame " + str(index + 1) + ". " + assist_label() + "."
-    refresh_ui()
-    state.ui.drawing.queue_draw()
+            group "Frames" {
+                show count(frames)
+                button Add    invites AddFrame
+                button Delete invites DeleteFrame when selection exists
+                show selection.dimensions when selection exists
+            }
 
-fn on_scroll(controller, dx, dy):
-    when state.image is none:
-        return false
-    let old = state.zoom
-    state.zoom = max(0.35, min(8.0, state.zoom * (0.88 if dy > 0 else 1.14)))
-    when abs(state.zoom - old) > 0.001:
-        affect("zoom", 0.4)
-    refresh_ui()
-    state.ui.drawing.queue_draw()
-    return true
+            group "Crop" {
+                control padding from 0px to 100px
+            }
 
-fn on_margin_changed(spin):
-    state.margin = int(spin.get_value())
+            group "Adaptive assistance" {
+                reveal user belief only as {
+                    "Normal assistance" when user flows
+                    "Precise assistance" when user struggles with current frame
+                    "Learning your editing rhythm" otherwise
+                }
+            }
 
-fn refresh_ui():
-    when state.ui is none:
-        return
-    let ui = state.ui
-    let idle = not state.busy
-    ui.open_button.set_sensitive(idle)
-    ui.scan_button.set_sensitive(idle)
-    ui.detect_button.set_sensitive(idle and state.image is not none)
-    ui.export_button.set_sensitive(idle and state.image is not none and bool(state.frames))
-    ui.add_button.set_sensitive(idle and state.image is not none)
-    ui.delete_button.set_sensitive(idle and state.selected is not none)
-    ui.undo_button.set_sensitive(idle and bool(state.undo))
-    ui.redo_button.set_sensitive(idle and bool(state.redo))
-    ui.fit_button.set_sensitive(state.image is not none)
-    ui.spinner.set_visible(state.busy)
-    ui.spinner.set_spinning(state.busy)
-    ui.status_label.set_text(state.status)
-    ui.empty_page.set_visible(state.image is none)
-    ui.drawing.set_sensitive(state.image is not none)
-    ui.assist_row.set_subtitle(assist_label())
-    ui.frames_row.set_subtitle(str(len(state.frames)) + (" frame" if len(state.frames) == 1 else " frames"))
-    ui.zoom_row.set_subtitle(str(int(round(state.zoom * 100))) + "%")
-    when state.image is none:
-        ui.source_row.set_title("No scan loaded")
-        ui.source_row.set_subtitle("PNG, JPEG, TIFF or SANE scanner")
-    otherwise:
-        let w, h = state.image.size
-        ui.source_row.set_title(os.path.basename(state.image_path) if state.image_path is not none else "Scanned image")
-        ui.source_row.set_subtitle(str(w) + " × " + str(h) + " px")
-    when state.selected is not none and state.selected < len(state.frames):
-        let bounds = frame_bounds(state.frames[state.selected]["corners"])
-        ui.selected_row.set_visible(true)
-        ui.selected_row.set_title("Frame " + str(state.selected + 1))
-        ui.selected_row.set_subtitle(str(int(bounds[2]-bounds[0])) + " × " + str(int(bounds[3]-bounds[1])) + " px")
-    otherwise:
-        ui.selected_row.set_visible(false)
+            group "View" {
+                show view.zoom
+            }
 
-fn icon_button(name, tooltip):
-    let button = gtk.Button(icon_name=name)
-    button.set_tooltip_text(tooltip)
-    return button
+            tell latest message
+        }
 
-fn labeled_button(icon, label, tooltip):
-    let box = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=6)
-    box.append(gtk.Image.new_from_icon_name(icon))
-    box.append(gtk.Label(label=label))
-    let button = gtk.Button()
-    button.set_child(box)
-    button.set_tooltip_text(tooltip)
-    return button
+        canvas Editor {
+            background follows system theme
 
-fn build_ui(app):
-    let window = adw.ApplicationWindow(application=app, title="Scan Slicer Emo", default_width=1200, default_height=820)
-    window.set_size_request(780, 520)
-    let header = adw.HeaderBar()
-    header.set_title_widget(adw.WindowTitle(title="Scan Slicer Emo", subtitle="Affective photo sheet editor"))
+            when no scan {
+                offer Empty {
+                    icon scanner-symbolic
+                    title "Open or scan an image"
+                    action "Scan from Scanner…" invites ScanImage
+                    action "Open Image…" invites OpenScan
+                }
+            }
 
-    let scan_button = labeled_button("scanner-symbolic", "Scan", "Scan from scanner")
-    let open_button = labeled_button("document-open-symbolic", "Open", "Open scan")
-    let detect_button = labeled_button("system-search-symbolic", "Detect", "Detect photos")
-    let export_button = gtk.Button(label="Export")
-    export_button.add_css_class("suggested-action")
-    let undo_button = icon_button("edit-undo-symbolic", "Undo")
-    let redo_button = icon_button("edit-redo-symbolic", "Redo")
-    let fit_button = icon_button("zoom-fit-best-symbolic", "Fit")
-    let api_button = icon_button("dialog-password-symbolic", "OpenAI API key")
-    header.pack_start(scan_button)
-    header.pack_start(open_button)
-    header.pack_start(detect_button)
-    header.pack_end(export_button)
-    header.pack_end(fit_button)
-    header.pack_end(redo_button)
-    header.pack_end(undo_button)
-    header.pack_end(api_button)
+            when scan exists {
+                show scan.image fitted through view
+                overlay every frame as quadrilateral
 
-    let source_group = adw.PreferencesGroup(title="Source")
-    let source_row = adw.ActionRow(title="No scan loaded", subtitle="PNG, JPEG, TIFF or SANE scanner")
-    source_group.add(source_row)
+                focused frame {
+                    handles on corners
+                    handles on edges
 
-    let frames_group = adw.PreferencesGroup(title="Frames")
-    let frames_row = adw.ActionRow(title="Detected frames", subtitle="0 frames")
-    let add_button = icon_button("list-add-symbolic", "Add frame")
-    let delete_button = icon_button("edit-delete-symbolic", "Delete frame")
-    delete_button.add_css_class("destructive-action")
-    frames_row.add_suffix(add_button)
-    frames_row.add_suffix(delete_button)
-    frames_group.add(frames_row)
-    let selected_row = adw.ActionRow(title="Selected frame", subtitle="")
-    selected_row.set_visible(false)
-    frames_group.add(selected_row)
+                    handle size responds to Editing
+                    snapping responds to Editing
+                }
 
-    let crop_group = adw.PreferencesGroup(title="Crop")
-    let padding_row = adw.ActionRow(title="Padding", subtitle="Extra pixels around AI-detected prints")
-    let padding_spin = gtk.SpinButton.new_with_range(0.0, 100.0, 1.0)
-    padding_row.add_suffix(padding_spin)
-    crop_group.add(padding_row)
+                gesture click frame {
+                    focus frame
+                }
 
-    let affect_group = adw.PreferencesGroup(title="Adaptive assistance")
-    let assist_row = adw.ActionRow(title="Interaction model", subtitle="Normal assistance")
-    affect_group.add(assist_row)
+                gesture drag empty-space {
+                    pan view
+                }
 
-    let view_group = adw.PreferencesGroup(title="View")
-    let zoom_row = adw.ActionRow(title="Zoom", subtitle="100%")
-    view_group.add(zoom_row)
+                gesture drag unfocused frame {
+                    focus frame
+                    pan view
+                }
 
-    let sidebar = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=18)
-    sidebar.set_size_request(310, -1)
-    sidebar.set_margin_top(18)
-    sidebar.set_margin_bottom(14)
-    sidebar.set_margin_start(16)
-    sidebar.set_margin_end(16)
-    sidebar.append(source_group)
-    sidebar.append(frames_group)
-    sidebar.append(crop_group)
-    sidebar.append(affect_group)
-    sidebar.append(view_group)
+                gesture drag focused frame {
+                    move frame respecting EditableFrame
+                }
 
-    let status_box = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
-    status_box.set_valign(gtk.Align.END)
-    status_box.set_vexpand(true)
-    let spinner = gtk.Spinner()
-    spinner.set_visible(false)
-    let status_label = gtk.Label(label=state.status)
-    status_label.set_wrap(true)
-    status_label.set_xalign(0.0)
-    status_label.add_css_class("dim-label")
-    status_box.append(spinner)
-    status_box.append(status_label)
-    sidebar.append(status_box)
+                gesture drag focused frame.corner {
+                    move corner respecting EditableFrame
+                }
 
-    let drawing = gtk.DrawingArea()
-    drawing.set_hexpand(true)
-    drawing.set_vexpand(true)
-    drawing.set_focusable(true)
-    drawing.add_css_class("scan-canvas")
+                gesture drag focused frame.edge {
+                    move edge preserving vector
+                    respecting EditableFrame
+                }
 
-    let empty_page = adw.StatusPage(title="Open or scan an image", description="Open PNG, JPEG or TIFF, or scan directly from a SANE-compatible scanner", icon_name="scanner-symbolic")
-    let empty_actions = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
-    empty_actions.set_halign(gtk.Align.CENTER)
-    let empty_scan = gtk.Button(label="Scan from Scanner…")
-    empty_scan.add_css_class("suggested-action")
-    let empty_open = gtk.Button(label="Open Image…")
-    empty_actions.append(empty_scan)
-    empty_actions.append(empty_open)
-    empty_page.set_child(empty_actions)
+                gesture wheel {
+                    zoom view around pointer
+                    perceive zooming
+                }
 
-    let overlay = gtk.Overlay()
-    overlay.set_child(drawing)
-    overlay.add_overlay(empty_page)
-    let paned = gtk.Paned(orientation=gtk.Orientation.HORIZONTAL)
-    paned.set_start_child(sidebar)
-    paned.set_end_child(overlay)
-    paned.set_position(310)
-    paned.set_resize_start_child(false)
-    paned.set_shrink_start_child(false)
+                while dragging and PreciseEditing offered {
+                    show Magnifier around pointer
+                }
+            }
+        }
+    }
+}
 
-    let toast_overlay = adw.ToastOverlay()
-    toast_overlay.set_child(paned)
-    let toolbar = adw.ToolbarView()
-    toolbar.add_top_bar(header)
-    toolbar.set_content(toast_overlay)
-    window.set_content(toolbar)
-
-    state.ui = type("Ui", (), {})()
-    state.ui.window = window
-    state.ui.drawing = drawing
-    state.ui.empty_page = empty_page
-    state.ui.source_row = source_row
-    state.ui.frames_row = frames_row
-    state.ui.selected_row = selected_row
-    state.ui.assist_row = assist_row
-    state.ui.zoom_row = zoom_row
-    state.ui.padding_spin = padding_spin
-    state.ui.scan_button = scan_button
-    state.ui.open_button = open_button
-    state.ui.detect_button = detect_button
-    state.ui.export_button = export_button
-    state.ui.add_button = add_button
-    state.ui.delete_button = delete_button
-    state.ui.undo_button = undo_button
-    state.ui.redo_button = redo_button
-    state.ui.fit_button = fit_button
-    state.ui.spinner = spinner
-    state.ui.status_label = status_label
-    state.ui.toast = toast_overlay
-
-    open_button.connect("clicked", open_scan)
-    empty_open.connect("clicked", open_scan)
-    scan_button.connect("clicked", scan_from_scanner)
-    empty_scan.connect("clicked", scan_from_scanner)
-    detect_button.connect("clicked", detect_photos)
-    export_button.connect("clicked", export_frames)
-    add_button.connect("clicked", add_frame)
-    delete_button.connect("clicked", delete_frame)
-    undo_button.connect("clicked", undo_edit)
-    redo_button.connect("clicked", redo_edit)
-    fit_button.connect("clicked", fit_view)
-    api_button.connect("clicked", lambda button: show_api_key_dialog())
-    padding_spin.connect("value-changed", on_margin_changed)
-
-    drawing.set_draw_func(draw_canvas)
-    let motion = gtk.EventControllerMotion()
-    motion.connect("motion", on_motion)
-    drawing.add_controller(motion)
-    let drag = gtk.GestureDrag()
-    drag.set_button(1)
-    drag.connect("drag-begin", on_drag_begin)
-    drag.connect("drag-update", on_drag_update)
-    drag.connect("drag-end", on_drag_end)
-    drawing.add_controller(drag)
-    let scroll = gtk.EventControllerScroll.new(gtk.EventControllerScrollFlags.VERTICAL)
-    scroll.connect("scroll", on_scroll)
-    drawing.add_controller(scroll)
-
-    install_css()
-    refresh_ui()
-    window.present()
-
-fn install_css():
-    let css = b"""
-        .scan-canvas { background: @view_bg_color; }
-        .dim-label { opacity: 0.72; }
-    """
-    let provider = gtk.CssProvider()
-    provider.load_from_data(css)
-    let display = gdk.Display.get_default()
-    when display is not none:
-        gtk.StyleContext.add_provider_for_display(display, provider, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+when app starts {
+    present Main
+}
