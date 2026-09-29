@@ -1,40 +1,68 @@
-# User emotion is a belief state inferred from interaction evidence.
-# It never claims to know what the user actually feels.
+belief user about emotion {
+    confident   0.45
+    uncertain   0.20
+    frustrated  0.05
 
-emotion user:
-    confident = 0.45
-    uncertain = 0.20
-    frustrated = 0.05
+    never certain
+    fades toward neutral over 45s
+}
 
-fn affect(event, amount=1.0):
-    observe user, event, amount=amount
-    update_assistance()
+meaning correction(frame) {
+    suggests uncertain      gently
+    suggests frustrated     faintly
+    weakens confident       faintly
+}
 
-fn update_assistance():
-    when user.frustrated >= 0.68 or user.uncertain >= 0.78:
-        state.assist = "strong"
-    otherwise when user.frustrated >= 0.38 or user.uncertain >= 0.48:
-        state.assist = "gentle"
-    otherwise:
-        state.assist = "normal"
+meaning repeated correction(frame) within 12s {
+    suggests frustrated     strongly
+    suggests uncertain      moderately
+}
 
-fn assist_handle_radius():
-    when state.assist == "strong":
-        return 11.0
-    otherwise when state.assist == "gentle":
-        return 8.5
-    return 7.0
+meaning undo soon after correction {
+    suggests uncertain      strongly
+    suggests frustrated     moderately
+}
 
-fn assist_snap_radius():
-    when state.assist == "strong":
-        return 24.0
-    otherwise when state.assist == "gentle":
-        return 10.0
-    return 0.0
+meaning repeated redetection {
+    suggests uncertain      strongly
+}
 
-fn assist_label():
-    when state.assist == "strong":
-        return "Strong assistance"
-    otherwise when state.assist == "gentle":
-        return "Gentle assistance"
-    return "Normal assistance"
+meaning detection succeeded and no correction for 20s {
+    suggests confident      strongly
+    weakens uncertain       moderately
+}
+
+meaning export succeeded {
+    suggests confident      moderately
+    weakens frustrated      gently
+}
+
+meaning failure {
+    suggests frustrated     moderately
+    suggests uncertain      gently
+}
+
+pattern user struggles with frame {
+    repeated correction(frame)
+    or undo soon after correction(frame)
+    or correction(frame) after repeated redetection
+}
+
+pattern user flows {
+    confident dominates uncertain and frustrated
+    sustained for 8s
+}
+
+offer PreciseEditing {
+    magnifier     eager
+    handles       generous
+    snapping      strong
+    hints         subtle
+}
+
+withdraw PreciseEditing {
+    magnifier     only while dragging
+    handles       normal
+    snapping      gentle
+    hints         hidden
+}
