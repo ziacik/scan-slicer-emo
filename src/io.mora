@@ -1,0 +1,59 @@
+faculty files from desktop.files {
+    can choose-image
+    can choose-folder
+    can numbered-path Folder Source Index Extension -> Path
+}
+
+faculty forms from desktop.forms {
+    can choose
+}
+
+faculty images from image-codec {
+    can load Path -> Image
+    can save Image Path -> Path
+}
+
+faculty scanner from sane {
+    can discover -> Devices
+    can acquire Device Dpi -> Image
+}
+
+desire OpenImage {
+    ask files.choose-image as source {
+        title "Open scan"
+        extensions png jpg jpeg tif tiff
+    }
+    attempt images.load source as image
+    remember scan.image as image
+    remember scan.source as source
+    remember regions as empty
+    forget selection
+    clear history
+    perceive document-arrived
+
+    on failure {
+        perceive failure
+        tell user "Could not open image"
+    }
+}
+
+desire AcquireImage {
+    attempt scanner.discover as devices
+    ask forms.choose as choice {
+        title "Scan from scanner"
+        options devices
+        field-dpi integer default 600 min 75 max 1200
+    }
+    attempt scanner.acquire choice.option choice.dpi as image
+    remember scan.image as image
+    remember scan.source as choice.option.label
+    remember regions as empty
+    forget selection
+    clear history
+    perceive document-arrived
+
+    on failure {
+        perceive failure
+        tell user "Scan failed"
+    }
+}
